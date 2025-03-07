@@ -1,0 +1,43 @@
+Wokwi CLI Guide
+
+Installing the Wokwi CLI:
+
+The Wokwi CLI is a standalone executable that can be downloaded from the Wokwi website.
+Visit the Wokwi website and download the appropriate version of the Wokwi CLI for your operating system.
+Extract the downloaded file to a directory of your choice.
+Creating a New Project:
+
+Open a terminal or command prompt and navigate to the directory where you want to create your project.
+Run the following command to create a new Wokwi project:
+wokwi new my-project
+This will create a new directory called my-project and initialize a new Wokwi project.
+Initializing a Project:
+
+If you have an existing project, you can initialize it with Wokwi using:
+wokwi init
+This will set up the necessary files and configurations for your project.
+Running a Project:
+
+To run your Wokwi project, use the following command:
+wokwi run
+This will start the Wokwi server and open your project in the browser.
+Building a Project:
+
+To build your Wokwi project, use the following command:
+wokwi build
+This will generate the necessary files for your project, such as the Arduino sketch or the Verilog code.
+Testing a Project:
+
+Wokwi provides a built-in testing framework that allows you to write and run tests for your project.
+To create a new test file, use the following command:
+wokwi test create my-test.js
+This will create a new test file called my-test.js in the test directory of your project.
+To run the tests, use the following command:
+wokwi test run
+This will execute all the tests in your project and display the results.
+Other Commands:
+
+wokwi help: Displays the available Wokwi CLI commands and their descriptions.
+wokwi login: Logs in to your Wokwi account.
+wokwi publish: Publishes your project to the Wokwi platform.
+wokwi share: Generates a shareable link for your project.

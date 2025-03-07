@@ -1,0 +1,6 @@
+# Wokwi Configuration File
+# Reference: https://docs.wokwi.com/vscode/project-config
+[wokwi]
+version = 1
+firmware = '.pio/build/fm-devkit/firmware.bin'
+elf = '.pio/build/fm-devkit/firmware.elf'

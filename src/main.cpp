@@ -1,44 +1,67 @@
 #include <Arduino.h>
 
-// Define the DIP switch pins
-const int DIP_SWITCH_PINS[] = {35, 32, 33, 25, 26, 27, 14, 12, 17, 5, 18, 19};
-const int NUM_DIP_SWITCHES = sizeof(DIP_SWITCH_PINS) / sizeof(DIP_SWITCH_PINS[0]);
-
 // Define the Potentiometer pin
 const int POT_PIN = 36;
 
 // Define the Button pin
 const int BTN_PIN = 23;
 
-// Functions
-// ...
-void setupDipSwitch(const int* dipSwitchPins) {
-  // Initialize the DIP switch pins as inputs
-  for (int i = 0; i < NUM_DIP_SWITCHES; i++) {
-    pinMode(dipSwitchPins[i], INPUT_PULLUP);
-  }
+// Define the Encoder pin
+const int ENC_PIN = 39;
+
+// Define the Driver Direction pins
+#define IN1 32
+#define IN2 33
+
+// Define the Driver Enable pin
+#define ENA 25
+
+void setup() {
+  // Initialize the serial communication
+  Serial.begin(115200);
+  
+  // Initialize the alanolgue potentiometer pin
+  setupPotentiometer(POT_PIN); 
+
+  // Initialize the digital input pin
+  setupButton(BTN_PIN);
+
+  // Initialize the analogue encoder pin
+  setupEncoder(ENC_PIN); 
+
+  // Initialize the driver pin
+  setupDriver(IN1, IN2, ENA);
+
+  return;
 }
 
-int readBinaryValue(const int* dipSwitchPins) {
-  int dip_switch_value = 0;
-  for (int i = 0; i < NUM_DIP_SWITCHES; i++) {
-    dip_switch_value |= (digitalRead(dipSwitchPins[i]) == LOW) << i;
-  }
-  return dip_switch_value;
-}
+void loop() {
+  // Reading potentiometer value
+  int potValue = readPotentiometer(POT_PIN); // Get potentiomenter value
+  Serial.print("Potentiometer Reading: ");
+  Serial.println(360.0 * potValue / 4095.00); 
 
-int convertBinaryToDecimal(int binary_value) {
-  int decimal_value = 0;
-  for (int i = 0; i < NUM_DIP_SWITCHES; i++) {
-    decimal_value += (binary_value & (1 << i)) ? (1 << i) : 0;
-  }
-  return decimal_value;
-}
+  // Reading encoder value
+  int encValue = readEncoder(ENC_PIN); // Get encoder value
+  float position = (360.0 / 5.0) * 5.0 * (encValue / 4095.00);
+  Serial.print("Encoder Reading: ");
+  Serial.println(position); 
+  
+  // Reading botton value
+  int btnValue = readButton(BTN_PIN);
+  Serial.print("Button Reading: ");
+  Serial.println(btnValue);
 
-void printBinaryValue(int binary_value) {
-  for (int i = NUM_DIP_SWITCHES - 1; i >= 0; i--) {
-    Serial.print((binary_value >> i) & 1);
-  }
+  // Controlling the motor
+  float deltaPower = position - potValue;
+  controlDriver(deltaPower);
+  
+  // Print line end
+  Serial.println("\n\n\n");
+
+  // Delay before the next reading
+  delay(500);
+  return;
 }
 
 void setupPotentiometer(int pinNumber) {
@@ -50,6 +73,15 @@ int readPotentiometer(int pinNumber) {
   return analogRead(pinNumber);  // Read from predefined pin
 }
 
+void setupEncoder(int pinNumber) {
+  pinMode(pinNumber, INPUT);
+  return;
+}
+
+int readEncoder(int pinNumber) {
+  return analogRead(pinNumber);
+}
+
 void setupButton(int pinNumber) {
   pinMode(pinNumber, INPUT_PULLUP);
   return;
@@ -59,46 +91,24 @@ int readButton(int pinNumber) {
   return digitalRead(pinNumber) == LOW;
 }
 
-void setup() {
-  // Initialize the serial communication
-  Serial.begin(115200);
-  
-  // Initialize the alanolgue input pin
-  setupPotentiometer(POT_PIN); 
-
-  // Initialize the digital input pins
-  setupDipSwitch(DIP_SWITCH_PINS);
-
-  // Initialize the digital input pin
-  setupButton(BTN_PIN);
-
+void setupDriver(int in1, int in2, int ena) {
+  pinMode(in1, OUTPUT);
+  pinMode(in2, OUTPUT);
+  pinMode(ena, OUTPUT);
   return;
 }
 
-void loop() {
-  // Read the DIP switch values
-  int dip_switch_value = readBinaryValue(DIP_SWITCH_PINS);
-  int decimal_value = convertBinaryToDecimal(dip_switch_value);
-  //Serial.print("DIP Switch Binary Value: ");
-  //printBinaryValue(dip_switch_value);
-  //Serial.println();
-  Serial.print("DIP Switch Decimal Value: ");
-  Serial.println(decimal_value);
-
-  // Reading potentiometer value
-  int potValue = readPotentiometer(POT_PIN); // Get potentiomenter value
-  Serial.print("Potentiometer Reading: ");
-  Serial.println(360.0 * potValue / 4095.00); 
-
-  // Reading botton value
-  int btnValue = readButton(BTN_PIN);
-  Serial.print("Button Reading: ");
-  Serial.println(btnValue);
-  
-  // Print line end
-  Serial.println("=============================================");
-
-  // Delay before the next reading
-  delay(100);
+void controlDriver(float deltaPower) {
+  analogWrite(ENA, int(abs(deltaPower * 255.0) * 2.0));
+  if (deltaPower == 0.0) {
+    digitalWrite(IN1, LOW);
+    digitalWrite(IN2, LOW);
+  } else if (deltaPower > 0) {
+    digitalWrite(IN1, HIGH);
+    digitalWrite(IN2, LOW);
+  } else {
+    digitalWrite(IN1, LOW);
+    digitalWrite(IN2, HIGH);
+  }
   return;
 }

@@ -4,8 +4,8 @@
 //#include <ArduinoJson.h>
 
 
-#define WIFI_SSID "Wokwi-GUEST"
-#define WIFI_PASSWORD ""
+#define WIFI_SSID "SARAO_GUEST"
+#define WIFI_PASSWORD "ska.2009"
 #define WIFI_CHANNEL 6
 
 

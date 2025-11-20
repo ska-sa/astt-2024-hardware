@@ -8,17 +8,17 @@ const int potPin = A0;  // Potentiometer for target azimuth
 const int encPin = 8;   // PWM encoder input (MAE3-P12 output)
 
 // --- Control parameters ---
-const float kP = 1.0;        // proportional gain (tune this)
+const float kP = 1.0;         // proportional gain (tune this)
 const float deadband = 0.05;  // motor stop threshold
 
 // --- Encoder constants ---
-const int ENCODER_RES = 4096;      // 12-bit encoder
-const float FULL_ROTATION = 360.0; // degrees per revolution
-const int MAX_TURNS = 3;           // allowed ±3 turns
+const int ENCODER_RES = 4096;       // 12-bit encoder
+const float FULL_ROTATION = 360.0;  // degrees per revolution
+const int MAX_TURNS = 3;            // allowed ±3 turns
 
 // --- Limits (for local movement) ---
-const float MIN_AZIMUTH = -130.0;  // degrees
-const float MAX_AZIMUTH = 130.0;   // degrees
+const float MIN_AZIMUTH = 0.0;  // degrees
+const float MAX_AZIMUTH = 360.0;   // degrees
 
 // --- State variables ---
 float currentAzAngle = 0.0;  // absolute azimuth (degrees)
@@ -45,8 +45,8 @@ void loop() {
   Serial.println("°");
 
   // --- Measure PWM duty cycle from encoder ---
-  unsigned long highTime = pulseIn(encPin, HIGH, 25000); // µs
-  unsigned long lowTime  = pulseIn(encPin, LOW, 25000);  // µs
+  unsigned long highTime = pulseIn(encPin, HIGH, 25000);  // µs
+  unsigned long lowTime = pulseIn(encPin, LOW, 25000);    // µs
   float dutyCycle = 0.0;
 
   if (highTime + lowTime > 0) {
@@ -54,7 +54,7 @@ void loop() {
   }
 
   // --- Convert duty cycle (0–4095 counts -> 0–360°) ---
-  float rawAngle = dutyCycle * FULL_ROTATION; // 0–360°
+  float rawAngle = dutyCycle * FULL_ROTATION;  // 0–360°
 
   // --- Detect rollover for continuous tracking ---
   float delta = rawAngle - prevRawAngle;
@@ -102,7 +102,8 @@ void loop() {
   // --- Compute error and proportional power ---
   float error = targetAzAngle - currentAzAngle;
   float power = kP * (error / 180.0);  // normalize error roughly to -1 to 1
-  power = constrain(power, -1.0, 1.0) * ;
+
+  power = constrain(power, -5.0, 0.5) ;
 
   Serial.print("Error: ");
   Serial.print(error, 2);
@@ -112,8 +113,34 @@ void loop() {
   Serial.print(power * 100.0, 1);
   Serial.println(" %");
 
+// P = (T - C) / 360
+
+/*
+Case 1
+T 150
+C 200
+
+P = (150 - 200) / 360 = -0.13
+*/
+
+/*
+Case 2
+T 200
+C 200
+
+P = (200 - 200) / 360 = 0
+*/
+
+/*
+Case 1
+T 300
+C 10
+
+P = (300 - 10) / 360 = 0.8
+*/
+
   // --- Motor control ---
-  if (abs(power) < deadband) {
+  if (power == 0) {
     stopMotor();
   } else if (power > 0) {
     rotateForward(abs(power));
@@ -122,7 +149,7 @@ void loop() {
   }
 
   Serial.println("------------------------");
-  delay(200);
+  delay(20);
 }
 
 // --- Helper Functions ---
@@ -135,7 +162,11 @@ void stopMotor() {
 void rotateForward(float pwmVal) {
   digitalWrite(IN1, HIGH);
   digitalWrite(IN2, LOW);
+
+  delay(20);
   analogWrite(ENA, int(pwmVal * 255.0));
+
+  delay(20);
 }
 
 void rotateBackward(float pwmVal) {

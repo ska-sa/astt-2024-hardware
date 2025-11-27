@@ -103,15 +103,17 @@ void loop() {
   float error = targetAzAngle - currentAzAngle;
   float power = kP * (error / 180.0);  // normalize error roughly to -1 to 1
 
-  power = constrain(power, -5.0, 0.5) ;
+  power = constrain(power, -1.0, 0.1) ;
 
   Serial.print("Error: ");
-  Serial.print(error, 2);
+  Serial.print(abs(error), 2);
   Serial.println("°");
 
   Serial.print("Power Output: ");
   Serial.print(power * 100.0, 1);
   Serial.println(" %");
+
+
 
 // P = (T - C) / 360
 
@@ -160,16 +162,17 @@ void stopMotor() {
 }
 
 void rotateForward(float pwmVal) {
+    pwmVal += 0.15;
+
   digitalWrite(IN1, HIGH);
   digitalWrite(IN2, LOW);
 
-  delay(20);
   analogWrite(ENA, int(pwmVal * 255.0));
 
-  delay(20);
 }
 
 void rotateBackward(float pwmVal) {
+  pwmVal += 0.15;
   digitalWrite(IN1, LOW);
   digitalWrite(IN2, HIGH);
   analogWrite(ENA, int(pwmVal * 255.0));

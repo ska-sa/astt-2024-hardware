@@ -1,29 +1,28 @@
-// --- Motor control pins ---
+// ---------------- Motor Pins ----------------
 const int IN1 = 7;
 const int IN2 = 6;
 const int ENA = 10;
 
-// --- Inputs ---
-const int potPin = A0;  // Potentiometer for target azimuth
-const int encPin = 8;   // PWM encoder input (MAE3-P12 output)
+// ---------------- Inputs ----------------
+const int potPin = A0;
+const int encPin = 8;
+const int estopPin = 11;   // active LOW toggle switch
 
-// --- Control parameters ---
-const float kP = 1.0;         // proportional gain (tune this)
-const float deadband = 0.05;  // motor stop threshold
+// ---------------- Control ----------------
+float kP = 20.0;
+float deadband = 3;         // degrees
+int minPWM = 150;              // to avoid "humming"
 
-// --- Encoder constants ---
-const int ENCODER_RES = 4096;       // 12-bit encoder
-const float FULL_ROTATION = 360.0;  // degrees per revolution
-const int MAX_TURNS = 3;            // allowed ±3 turns
+// ---------------- Encoder ----------------
+const int ENCODER_RES = 4096;
+const float FULL_ROT = 360.0;
+const int MAX_TURNS = 3;
 
-// --- Limits (for local movement) ---
-const float MIN_AZIMUTH = 0.0;  // degrees
-const float MAX_AZIMUTH = 360.0;   // degrees
-
-// --- State variables ---
-float currentAzAngle = 0.0;  // absolute azimuth (degrees)
-float prevRawAngle = 0.0;    // previous encoder angle for rollover detection
-long turnCount = 0;          // number of full rotations (positive/negative)
+// ---------------- State ----------------
+float prevRaw = 0;
+long turns = 0;
+float az = 0;
+bool estopState = false;   // false = running, true = stopped
 
 void setup() {
   Serial.begin(115200);
@@ -31,149 +30,132 @@ void setup() {
   pinMode(IN1, OUTPUT);
   pinMode(IN2, OUTPUT);
   pinMode(ENA, OUTPUT);
+
   pinMode(potPin, INPUT);
   pinMode(encPin, INPUT);
+  pinMode(estopPin, INPUT_PULLUP); // GND when pressed
 
-  Serial.println("MAE3-P12 Encoder Control Initialized");
+  stopMotor();
+  Serial.println("AZ Motor Controller Ready");
 }
 
 void loop() {
-  // --- Read target azimuth from potentiometer ---
-  float targetAzAngle = map(analogRead(potPin), 0, 1023, MIN_AZIMUTH, MAX_AZIMUTH);
-  Serial.print("Target Azimuth: ");
-  Serial.print(targetAzAngle, 2);
-  Serial.println("°");
 
-  // --- Measure PWM duty cycle from encoder ---
-  unsigned long highTime = pulseIn(encPin, HIGH, 25000);  // µs
-  unsigned long lowTime = pulseIn(encPin, LOW, 25000);    // µs
-  float dutyCycle = 0.0;
+  // --------- Emergency Stop Toggle ---------
+  static bool lastButton = HIGH;
+  bool button = digitalRead(estopPin);
 
-  if (highTime + lowTime > 0) {
-    dutyCycle = (float)highTime / (float)(highTime + lowTime);
+  if (button == LOW && lastButton == HIGH) {  
+    estopState = !estopState; // toggle
+    delay(200); // debounce
   }
+  lastButton = button;
 
-  // --- Convert duty cycle (0–4095 counts -> 0–360°) ---
-  float rawAngle = dutyCycle * FULL_ROTATION;  // 0–360°
-
-  // --- Detect rollover for continuous tracking ---
-  float delta = rawAngle - prevRawAngle;
-  if (delta > 180.0) {
-    turnCount--;
-  } else if (delta < -180.0) {
-    turnCount++;
-  }
-  prevRawAngle = rawAngle;
-
-  // --- Compute continuous angle ---
-  currentAzAngle = turnCount * FULL_ROTATION + rawAngle;
-
-  // --- Auto-reset if more than ±3 rotations ---
-  if (abs(turnCount) > MAX_TURNS) {
-    Serial.println("⚠️ Exceeded 3-turn limit! Resetting encoder tracking to zero...");
+  if (estopState) {
     stopMotor();
-    delay(300);
-    turnCount = 0;
-    prevRawAngle = rawAngle;
-    currentAzAngle = rawAngle;
-  }
-
-  Serial.print("Turn Count: ");
-  Serial.println(turnCount);
-  Serial.print("Current Azimuth: ");
-  Serial.print(currentAzAngle, 2);
-  Serial.println("°");
-
-  // --- Safety: restrict movement within local bounds ---
-  if (currentAzAngle <= MIN_AZIMUTH && targetAzAngle < currentAzAngle) {
-    Serial.println("⚠️ At minimum limit — cannot move further negative.");
-    stopMotor();
-    delay(200);
+    Serial.println("EMERGENCY STOP ACTIVE");
+    delay(100);
     return;
   }
 
-  if (currentAzAngle >= MAX_AZIMUTH && targetAzAngle > currentAzAngle) {
-    Serial.println("⚠️ At maximum limit — cannot move further positive.");
+  // --------- Potentiometer Target ----------
+  float target = map(analogRead(potPin), 0, 1023, 0, 360);
+
+  // --------- Encoder Measure ----------
+  float raw = readEncoderAngle();
+  updateRollover(raw);
+  az = turns * FULL_ROT + raw;
+
+  // --------- Bounds ---------
+  if ((az <= 0 && target < az) || (az >= 360 && target > az)) {
     stopMotor();
-    delay(200);
+    Serial.println("HARD LIMIT REACHED");
     return;
   }
 
-  // --- Compute error and proportional power ---
-  float error = targetAzAngle - currentAzAngle;
-  float power = kP * (error / 180.0);  // normalize error roughly to -1 to 1
+  // --------- Control ---------
+  float error = target - az;
 
-  power = constrain(power, -1.0, 0.1) ;
-
-  Serial.print("Error: ");
-  Serial.print(abs(error), 2);
-  Serial.println("°");
-
-  Serial.print("Power Output: ");
-  Serial.print(power * 100.0, 1);
-  Serial.println(" %");
-
-
-
-// P = (T - C) / 360
-
-/*
-Case 1
-T 150
-C 200
-
-P = (150 - 200) / 360 = -0.13
-*/
-
-/*
-Case 2
-T 200
-C 200
-
-P = (200 - 200) / 360 = 0
-*/
-
-/*
-Case 1
-T 300
-C 10
-
-P = (300 - 10) / 360 = 0.8
-*/
-
-  // --- Motor control ---
-  if (power == 0) {
+  float power = kP * (error / 180.0);
+  power = constrain(power, -1.0, 1.0);
+  if (abs(error) < deadband) {
     stopMotor();
-  } else if (power > 0) {
-    rotateForward(abs(power));
+    Serial.println(" ");
   } else {
-    rotateBackward(abs(power));
+ // --------- Motor Direction + Anti-Stall Logic ---------
+  applyMotor(power);
   }
 
-  Serial.println("------------------------");
+
+ 
+
+  // ------ Debug ------
+  Serial.print("AZ="); Serial.print(az);
+  Serial.print("  TGT="); Serial.print(target);
+  Serial.print("  ERR="); Serial.print(error);
+  Serial.print("  PWR="); Serial.println(power, 3);
+
   delay(20);
 }
 
-// --- Helper Functions ---
+// ----------------------------------------------------
+// ----------------- Helper Functions -----------------
+// ----------------------------------------------------
+
+float readEncoderAngle() {
+  unsigned long hi = pulseIn(encPin, HIGH, 25000);
+  unsigned long lo = pulseIn(encPin, LOW, 25000);
+  if (hi + lo == 0) return prevRaw;
+
+  float duty = float(hi) / float(hi + lo);
+  return duty * FULL_ROT;
+}
+
+void updateRollover(float raw) {
+  float d = raw - prevRaw;
+  if (d > 180) turns--;
+  if (d < -180) turns++;
+  prevRaw = raw;
+
+  if (abs(turns) > MAX_TURNS) {
+    turns = 0;
+    prevRaw = raw;
+    az = raw;
+  }
+}
+
+void applyMotor(float power) {
+  if (power == 0) {
+    stopMotor();
+    return;
+  }
+
+  int pwm = abs(power) * 255;
+
+  // Avoid humming: enforce minimum PWM
+  if (pwm < minPWM) pwm = minPWM;
+
+  if (power > 0) {
+    rotateCW(pwm);
+  } else {
+    rotateCCW(pwm);
+  }
+}
+
 void stopMotor() {
   digitalWrite(IN1, LOW);
   digitalWrite(IN2, LOW);
   analogWrite(ENA, 0);
 }
 
-void rotateForward(float pwmVal) {
-    pwmVal += 0.15;
-
+void rotateCW(int pwm) {  // forward
   digitalWrite(IN1, HIGH);
   digitalWrite(IN2, LOW);
-
-  analogWrite(ENA, int(pwmVal * 255.0));
-
+  analogWrite(ENA, pwm);
 }
 
-void rotateBackward(float pwmVal) {
-  pwmVal += 0.15;
+void rotateCCW(int pwm) { // backward
   digitalWrite(IN1, LOW);
   digitalWrite(IN2, HIGH);
-  analogWrite(ENA, int(pwmVal * 255.0));
+  analogWrite(ENA, pwm);
 }

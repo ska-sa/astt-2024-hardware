@@ -1,69 +1,74 @@
 import math
 from datetime import datetime
 
-def calculate_sun_az_el(lat: float, lon: float, dt_utc: datetime):
-    # Constants
-    RAD = math.pi / 180.0
-    DEG = 180.0 / math.pi
+# GPS
+LAT: float = -33.94462
+LON: float = 18.47922
 
-    # 1. Time Calculations
-    # Day of year (n)
-    n = dt_utc.timetuple().tm_yday
-    # Fractional hour of the day
-    hour_utc = dt_utc.hour + dt_utc.minute / 60.0 + dt_utc.second / 3600.0
+# Source
+# RA 01h 42m 05s -> Convert to decimal hours first
+#RA: float = 10.0
+RA: float = 2 * (15.0 / 1.0) + 6 * (15.0 / 60.0) + 24 * ( 15.0 / 3600.0)
+#DEC: float = 153.0
+DEC: float = 12 + 47 / 60 + 52 / 3600 # Fixed the 60/3600 error in your snippet
 
-    # 2. Solar Declination (delta)
-    # Range: -23.44 to +23.44 degrees
-    # This represents the Sun's "latitude" relative to the equator
-    delta = 23.44 * math.sin(RAD * (360 / 365.25 * (n - 81)))
+# Datetime
+NOW: datetime = datetime(2026, 4, 24, 18 - 2, 12, 0)
+
+def compute_elevation_angle(lat: float=LAT, lon: float=LON, ra: float=RA, dec: float=DEC, now: datetime=NOW) -> float:
+    # 1. Calculate Greenwich Mean Sidereal Time (GMST)
+    # Using a more precise JD calculation for noon
+    jd = now.toordinal() + 1721424.5 + (now.hour / 24) + (now.minute / 1440) + (now.second / 86400)
+    d = jd - 2451545.0
     
-    # 3. Equation of Time (EoT) 
-    # Corrects for the Earth's elliptical orbit and axial tilt
-    b = RAD * (360 / 365.25 * (n - 81))
-    eot = 9.87 * math.sin(2 * b) - 7.53 * math.cos(b) - 1.5 * math.sin(b)
+    gmst = (18.697374558 + 24.06570982441908 * d) % 24
+    gmst_deg = gmst * 15.0
 
-    # 4. Local Solar Time (LST) and Hour Angle (H)
-    # Adjust UTC for longitude (15 deg/hour) and the Equation of Time
-    lst = hour_utc + (lon / 15.0) + (eot / 60.0)
-    # Hour angle: 0 at solar noon, -15 deg per hour before noon, +15 deg after
-    h = (lst - 12.0) * 15.0
+    # 2. Calculate Local Sidereal Time (LST)
+    lst = (gmst_deg + lon) % 360
 
-    # 5. Calculate Elevation (El)
-    phi_rad = lat * RAD
-    delta_rad = delta * RAD
-    h_rad = h * RAD
+    # 3. Calculate Local Hour Angle (HA)
+    ha = (lst - ra) % 360
     
-    sin_el = (math.sin(phi_rad) * math.sin(delta_rad) + 
-              math.cos(phi_rad) * math.cos(delta_rad) * math.cos(h_rad))
-    # Clamp to handle rounding errors
-    sin_el = max(-1.0, min(1.0, sin_el))
-    el_rad = math.asin(sin_el)
-    el_deg = el_rad * DEG
+    # Convert to radians for math functions
+    rad_lat = math.radians(lat)
+    rad_dec = math.radians(dec)
+    rad_ha = math.radians(ha)
 
-    # 6. Calculate Azimuth (Az)
-    # Measured clockwise from North (0 degrees)
-    cos_az = (math.sin(delta_rad) - math.sin(el_rad) * math.sin(phi_rad)) / (math.cos(el_rad) * math.cos(phi_rad))
-    # Clamp to avoid math domain errors
-    cos_az = max(-1.0, min(1.0, cos_az))
-    az_deg = math.acos(cos_az) * DEG
+    # 4. Calculate Elevation Angle (el)
+    sin_el = math.sin(rad_dec) * math.sin(rad_lat) + math.cos(rad_dec) * math.cos(rad_lat) * math.cos(rad_ha)
+    el = math.asin(sin_el)
     
-    # Correction for afternoon (if Hour Angle is positive, Sun is in the West)
-    if h > 0:
-        az_deg = 360.0 - az_deg
+    return math.degrees(el)
 
-    return az_deg, el_deg
+def compute_azimuthm_angle(lat: float=LAT, lon: float=LON, ra: float=RA, dec: float=DEC, now: datetime=NOW) -> float:
+    el_deg = compute_elevation_angle(lat, lon, ra, dec, now)
+    
+    # Need HA again for the direction check
+    jd = now.toordinal() + 1721424.5 + (now.hour / 24) + (now.minute / 1440) + (now.second / 86400)
+    d = jd - 2451545.0
+    lst = ((18.697374558 + 24.06570982441908 * d) * 15.0 + lon) % 360
+    ha = (lst - ra) % 360
 
-# --- INPUTS ---
-lat_input: float = -33.9411
-lon_input: float = 18.491
-time_input: datetime = datetime(2026, 3, 27, 12, 30, 0) # UTC Time
+    rad_lat = math.radians(lat)
+    rad_dec = math.radians(dec)
+    rad_el = math.radians(el_deg)
+    rad_ha = math.radians(ha)
 
-# --- EXECUTION ---
-az, el = calculate_sun_az_el(lat_input, lon_input, time_input)
+    # 5. Calculate Azimuth Angle (az)
+    try:
+        cos_az = (math.sin(rad_dec) - math.sin(rad_el) * math.sin(rad_lat)) / (math.cos(rad_el) * math.cos(rad_lat))
+        # Clamp value to avoid math domain errors due to precision
+        cos_az = max(-1, min(1, cos_az))
+        az = math.degrees(math.acos(cos_az))
+        
+        # Adjust Azimuth based on Hour Angle (East vs West)
+        if math.sin(rad_ha) > 0:
+            az = 360 - az
+    except ZeroDivisionError:
+        az = 0.0
 
-print(f"Source:    SUN")
-print(f"UTC Time:  {time_input}")
-print(f"Location:  Lat {lat_input}, Lon {lon_input}")
-print("-" * 30)
-print(f"Azimuth:   {az:.4f}° (North-based)")
-print(f"Elevation: {el:.4f}°")
+    return az
+
+print(f"Azimuth Angle: {compute_azimuthm_angle():.4f}°")
+print(f"Elevation Angle: {compute_elevation_angle():.4f}°")

@@ -8,12 +8,12 @@ LON: float = 18.47922
 # Source
 # RA 01h 42m 05s -> Convert to decimal hours first
 #RA: float = 10.0
-RA: float = 2 * (15.0 / 1.0) + 6 * (15.0 / 60.0) + 24 * ( 15.0 / 3600.0)
-#DEC: float = 153.0
-DEC: float = 12 + 47 / 60 + 52 / 3600 # Fixed the 60/3600 error in your snippet
+RA: float = 2 * (15.0 / 1.0) + 8 * (15.0 / 60.0) + 32.19 * ( 15.0 / 3600.0)
+#DEC: float = 12 + 47 / 60 + 52 / 3600 # Fixed the 60/3600 error in your snippet
+DEC: float = 12.987
 
 # Datetime
-NOW: datetime = datetime(2026, 4, 24, 18 - 2, 12, 0)
+NOW: datetime = datetime(2026, 4, 24, 15 - 2, 39, 0)
 
 def compute_elevation_angle(lat: float=LAT, lon: float=LON, ra: float=RA, dec: float=DEC, now: datetime=NOW) -> float:
     # 1. Calculate Greenwich Mean Sidereal Time (GMST)

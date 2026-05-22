@@ -74,8 +74,9 @@ void loop() {
   }
 
   // --------- Control ---------
-  float error = target - az;
-
+  // float error = target - az;
+  int error = (int)az - (int)target;
+  
   float power = kP * (error / 180.0);
   power = constrain(power, -1.0, 1.0);
   if (abs(error) < deadband) {
@@ -103,12 +104,49 @@ void loop() {
 // ----------------------------------------------------
 
 float readEncoderAngle() {
-  unsigned long hi = pulseIn(encPin, HIGH, 25000);
-  unsigned long lo = pulseIn(encPin, LOW, 25000);
-  if (hi + lo == 0) return prevRaw;
 
-  float duty = float(hi) / float(hi + lo);
-  return duty * FULL_ROT;
+  const int samples = 5;
+  float sum = 0;
+  int validSamples = 0;
+
+  // ----- Average multiple readings -----
+  for (int i = 0; i < samples; i++) {
+
+    unsigned long hi = pulseIn(encPin, HIGH, 25000);
+    unsigned long lo = pulseIn(encPin, LOW, 25000);
+
+    if ((hi + lo) == 0) continue;
+
+    float duty = (float)hi / (float)(hi + lo);
+    float angle = duty * FULL_ROT;
+
+    // Clamp
+    if (angle < 0.0) angle = 0.0;
+    if (angle > 360.0) angle = 360.0;
+
+    sum += angle;
+    validSamples++;
+  }
+
+  // If no valid readings, keep previous value
+  if (validSamples == 0) {
+    return prevRaw;
+  }
+
+  // ----- Average result -----
+  float avgAngle = sum / validSamples;
+
+  // ----- Reject sudden impossible jumps -----
+  if (abs(avgAngle - prevRaw) > 20.0) {
+    avgAngle = prevRaw;
+  }
+
+  // ----- Low-pass filter -----
+  float filtered = (0.7 * prevRaw) + (0.3 * avgAngle);
+
+  prevRaw = filtered;
+
+  return filtered;
 }
 
 void updateRollover(float raw) {

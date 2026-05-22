@@ -1,0 +1,17 @@
+AT
+
+AT+RST
+
+AT+CWMODE=1
+
+AT+CWJAP="ssid","password"
+
+AT+CIFSR
+
+AT+CIPMUX=0
+
+AT+CIPSTART="TCP","ip",port
+
+AT+CIPSEND=59
+
+GET /api/v1/users/1 HTTP/1.0\r\nHost: ip\r\n\r\n

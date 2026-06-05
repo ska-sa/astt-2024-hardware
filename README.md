@@ -54,19 +54,25 @@ arduino-cli board list
 arduino-cli upload -p /dev/ttyUSB0 --fqbn arduino:avr:uno
 ```
 
-## 9. Install libraries
+## 9. Search for library names
+
+```bash
+arduino-cli lib search "Adafruit GPS"
+```
+
+## 10. Install libraries
 
 ```bash
 arduino-cli lib install "Adafruit NeoPixel"
 ```
 
-## 10. List installed libraries
+## 11. List installed libraries
 
 ```bash
 arduino-cli lib list
 ```
 
-## 11. Monitor serial port (real-time output)
+## 12. Monitor serial port (real-time output)
 
 ```bash
 arduino-cli monitor -p /dev/ttyUSB0 -c 115200

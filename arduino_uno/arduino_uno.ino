@@ -1,9 +1,35 @@
+#include <math.h>
 #include <Wire.h>
 #include <WiFi.h>
 #include <Arduino.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include <Adafruit_GPS.h>
+#include <SparkFun_MMC5983MA_Arduino_Library.h>
+
+// Magnetometer
+SFE_MMC5983MA myMag;
+
+// Declination angle in degrees
+float magneticDeclination = -25.4;
+
+// FIX: 90° correction (your case needs +90)
+float headingOffset = 90.0;
+
+// Calibration variables
+bool calibrated = false;
+unsigned long calibStartTime = 0;
+
+uint32_t minX = 4294967295;
+uint32_t minY = 4294967295;
+uint32_t minZ = 4294967295;
+
+uint32_t maxX = 0;
+uint32_t maxY = 0;
+uint32_t maxZ = 0;
+
+float offX = 0, offY = 0, offZ = 0;
+float scaleX = 1, scaleY = 1, scaleZ = 1;
 
 // WiFi
 const char *ssid = "SARAO_Guest";
@@ -253,6 +279,7 @@ void setup()
 {
     Serial.begin(115200);
 
+    // Motor Setup
     pinMode(IN1, OUTPUT);
     pinMode(IN2, OUTPUT);
     pinMode(ENA, OUTPUT);
@@ -262,6 +289,7 @@ void setup()
 
     stopMotor();
 
+    // GPS Setup
     GPS.begin(0x10);
     GPS.sendCommand(PMTK_SET_NMEA_OUTPUT_RMCGGA);
     GPS.sendCommand(PMTK_SET_NMEA_UPDATE_1HZ);
@@ -269,7 +297,22 @@ void setup()
     GPS.sendCommand(PGCMD_ANTENNA);
     delay(10);
 
+    // WiFi Setup
     connectWifi();
+
+    // Magnetometer Setup
+    Wire.begin();
+
+    if (myMag.begin() == false)
+    {
+        Serial.println("MMC5983MA did not respond - check wiring. Freezing.");
+        while (true);
+    }
+
+    myMag.softReset();
+    // Serial.println("Calibrating... move the sensor in all directions");
+
+    calibStartTime = millis();
     Serial.println("Ready");
 }
 
@@ -369,5 +412,75 @@ void loop()
         pollCommands();
     }
 
+    uint32_t rawX, rawY, rawZ;
+
+    myMag.getMeasurementXYZ(&rawX, &rawY, &rawZ);
+
+    // -------------------------
+    // CALIBRATION PHASE (20 seconds)
+    // -------------------------
+    if (!calibrated)
+    {
+        if (rawX < minX) minX = rawX;
+        if (rawY < minY) minY = rawY;
+        if (rawZ < minZ) minZ = rawZ;
+
+        if (rawX > maxX) maxX = rawX;
+        if (rawY > maxY) maxY = rawY;
+        if (rawZ > maxZ) maxZ = rawZ;
+
+        if (millis() - calibStartTime > 20000)
+        {
+            offX = (maxX + minX) / 2.0;
+            offY = (maxY + minY) / 2.0;
+            offZ = (maxZ + minZ) / 2.0;
+
+            scaleX = (maxX - minX) / 2.0;
+            scaleY = (maxY - minY) / 2.0;
+            scaleZ = (maxZ - minZ) / 2.0;
+
+            calibrated = true;
+
+            Serial.println("Calibration complete!");
+        }
+
+        delay(50);
+        return;
+    }
+
+    // -------------------------
+    // APPLY CALIBRATION
+    // -------------------------
+    float cx = ((float)rawX - offX) / scaleX;
+    float cy = ((float)rawY - offY) / scaleY;
+    float cz = ((float)rawZ - offZ) / scaleZ;
+
+    // -------------------------
+    // HEADING
+    // -------------------------
+    float heading = atan2(cx, -cy);
+    heading = heading * 180.0 / PI;
+    heading += 180;
+
+    // FIX: correct 90° rotation
+    heading += headingOffset;
+
+    // Normalize magnetic heading
+    if (heading >= 360) heading -= 360;
+    if (heading < 0) heading += 360;
+
+    // Apply declination
+    float trueHeading = heading + magneticDeclination;
+
+    // Normalize true heading
+    if (trueHeading >= 360) trueHeading -= 360;
+    if (trueHeading < 0) trueHeading += 360;
+
+    Serial.print("\nMag Heading: ");
+    Serial.println(heading, 1);
+
+    Serial.print("True Heading: ");
+    Serial.println(trueHeading, 1);
+    
     delay(20);
 }

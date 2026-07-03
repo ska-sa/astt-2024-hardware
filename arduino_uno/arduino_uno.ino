@@ -92,53 +92,49 @@ Adafruit_GPS GPS(&Wire);
 
 // motor helpers
 
-void stopMotor()
-{
+void stopMotor(){
     digitalWrite(IN1, LOW);
     digitalWrite(IN2, LOW);
     analogWrite(ENA, 0);
 }
 
-void rotateCW(int pwm)
-{
+void rotateCW(int pwm){
     digitalWrite(IN1, HIGH);
     digitalWrite(IN2, LOW);
     analogWrite(ENA, pwm);
 }
 
-void rotateCCW(int pwm)
-{
+void rotateCCW(int pwm){
     digitalWrite(IN1, LOW);
     digitalWrite(IN2, HIGH);
     analogWrite(ENA, pwm);
 }
 
-void applyMotor(float power)
-{
-    if (power == 0)
-    {
+void applyMotor(float power){
+    if (power == 0){
         stopMotor();
         return;
     }
     int pwm = abs(power) * 255;
-    if (pwm < minPWM)
+    if (pwm < minPWM){
         pwm = minPWM;
-    if (power > 0)
+    }
+    if (power > 0){
         rotateCW(pwm);
-    else
+    }
+    else{
         rotateCCW(pwm);
+    }
 }
 
 // encoder
 
-float readEncoderAngle()
-{
+float readEncoderAngle(){
     const int samples = 5;
     float sum = 0;
     int valid = 0;
 
-    for (int i = 0; i < samples; i++)
-    {
+    for (int i = 0; i < samples; i++){
         unsigned long hi = pulseIn(encPin, HIGH, 25000);
         unsigned long lo = pulseIn(encPin, LOW, 25000);
         if (hi + lo == 0)
@@ -152,15 +148,15 @@ float readEncoderAngle()
         valid++;
     }
 
-    if (valid == 0)
+    if (valid == 0){
         return prevRaw;
-
+    }
     float avg = sum / valid;
 
     // reject impossible jump
-    if (abs(avg - prevRaw) > 20.0)
+    if (abs(avg - prevRaw) > 20.0){
         avg = prevRaw;
-
+    }
     // low pass filter
     float filtered = (0.7 * prevRaw) + (0.3 * avg);
     prevRaw = filtered;
@@ -169,16 +165,15 @@ float readEncoderAngle()
 
 // GPS
 
-void readGPS()
-{
+void readGPS(){
     char c = GPS.read();
-    if (!GPS.newNMEAreceived())
+    if (!GPS.newNMEAreceived()){
         return;
-    if (!GPS.parse(GPS.lastNMEA()))
+    }
+    if (!GPS.parse(GPS.lastNMEA())){
         return;
-
-    if (GPS.fix)
-    {
+    }
+    if (GPS.fix){
         latitude = GPS.latitudeDegrees;
         longitude = GPS.longitudeDegrees;
         altitude = GPS.altitude;
@@ -187,23 +182,20 @@ void readGPS()
 
 // network
 
-void connectWifi()
-{
+void connectWifi(){
     WiFi.begin(ssid, password);
     Serial.print("Connecting");
-    while (WiFi.status() != WL_CONNECTED)
-    {
+    while (WiFi.status() != WL_CONNECTED){
         delay(50);
         Serial.print(".");
     }
     Serial.println("\nConnected: " + WiFi.localIP().toString());
 }
 
-void postReadings()
-{
-    if (WiFi.status() != WL_CONNECTED)
+void postReadings(){
+    if (WiFi.status() != WL_CONNECTED){
         return;
-
+    }
     HTTPClient http;
     http.begin(readingsUrl);
     http.addHeader("Content-Type", "application/json");
@@ -235,17 +227,16 @@ void postReadings()
     http.end();
 }
 
-void pollCommands()
-{
-    if (WiFi.status() != WL_CONNECTED)
+void pollCommands(){
+    if (WiFi.status() != WL_CONNECTED){
         return;
+    }
 
     HTTPClient http;
     http.begin(commandsUrl);
 
     int code = http.GET();
-    if (code != 200)
-    {
+    if (code != 200){
         Serial.printf("GET failed: %d\n", code);
         http.end();
         return;
@@ -254,8 +245,7 @@ void pollCommands()
     String response = http.getString();
     JsonDocument doc;
 
-    if (deserializeJson(doc, response))
-    {
+    if (deserializeJson(doc, response)){
         Serial.println("JSON parse error");
         http.end();
         return;
@@ -263,8 +253,7 @@ void pollCommands()
 
     float newAz = doc["target_az_angle"] | -1.0f;
 
-    if (newAz >= 0 && abs(newAz - apiTarget) > 0.5)
-    {
+    if (newAz >= 0 && abs(newAz - apiTarget) > 0.5){
         apiTarget = newAz;
         lastApiTime = millis();
         Serial.printf("API target: %.2f\n", apiTarget);
@@ -273,10 +262,9 @@ void pollCommands()
     http.end();
 }
 
-// setup and loop
+// setup
 
-void setup()
-{
+void setup(){
     Serial.begin(115200);
 
     // Motor Setup
@@ -303,8 +291,7 @@ void setup()
     // Magnetometer Setup
     Wire.begin();
 
-    if (myMag.begin() == false)
-    {
+    if (myMag.begin() == false){
         Serial.println("MMC5983MA did not respond - check wiring. Freezing.");
         while (true);
     }
@@ -316,8 +303,8 @@ void setup()
     Serial.println("Ready");
 }
 
-void loop()
-{
+// loop
+void loop(){
     unsigned long now = millis();
 
     // GPS
@@ -325,15 +312,13 @@ void loop()
 
     // estop toggle
     bool button = digitalRead(estopPin);
-    if (button == LOW && lastButton == HIGH)
-    {
+    if (button == LOW && lastButton == HIGH){
         estopState = !estopState;
         delay(15);
     }
     lastButton = button;
 
-    if (estopState)
-    {
+    if (estopState){
         stopMotor();
         movementStatus = "ESTOP";
         healthStatus = "FAULT";
@@ -350,8 +335,7 @@ void loop()
 
     // read pot, detect movement
     float rawPot = map(analogRead(potPin), 0, 1023, 0, 360);
-    if (abs(rawPot - potTarget) > 2.0)
-    {
+    if (abs(rawPot - potTarget) > 2.0){
         potTarget = rawPot;
         lastPotTime = now;
     }
@@ -361,18 +345,15 @@ void loop()
     bool potRecent = (now - lastPotTime < SOURCE_TIMEOUT);
     float target;
 
-    if (apiRecent && (!potRecent || lastApiTime > lastPotTime))
-    {
+    if (apiRecent && (!potRecent || lastApiTime > lastPotTime)){
         target = apiTarget;
     }
-    else
-    {
+    else{
         target = potTarget;
     }
 
     // hard limits
-    if ((az <= 0 && target < az) || (az >= 360 && target > az))
-    {
+    if ((az <= 0 && target < az) || (az >= 360 && target > az)){
         stopMotor();
         movementStatus = "LIMIT";
         Serial.println("Hard limit");
@@ -384,30 +365,27 @@ void loop()
     float power = kP * (error / 180.0);
     power = constrain(power, -1.0, 1.0);
 
-    if (abs(error) < deadband)
-    {
+    if (abs(error) < deadband){
         stopMotor();
         movementStatus = "IDLE";
     }
-    else
-    {
+    else{
         applyMotor(power);
         movementStatus = "MOVING";
     }
 
     Serial.printf("AZ=%.1f  TGT=%.1f  ERR=%.1f  SRC=%s\n",
-                  az, target, error,
-                  (apiRecent && lastApiTime > lastPotTime) ? "API" : "POT");
+        az, target, error,
+        (apiRecent && lastApiTime > lastPotTime) ? "API" : "POT"
+    );
 
     // network
-    if (now - lastPostTime >= POST_INTERVAL)
-    {
+    if (now - lastPostTime >= POST_INTERVAL){
         lastPostTime = now;
         postReadings();
     }
 
-    if (now - lastPollTime >= POLL_INTERVAL)
-    {
+    if (now - lastPollTime >= POLL_INTERVAL){
         lastPollTime = now;
         pollCommands();
     }
@@ -419,8 +397,7 @@ void loop()
     // -------------------------
     // CALIBRATION PHASE (20 seconds)
     // -------------------------
-    if (!calibrated)
-    {
+    if (!calibrated){
         if (rawX < minX) minX = rawX;
         if (rawY < minY) minY = rawY;
         if (rawZ < minZ) minZ = rawZ;
@@ -429,8 +406,7 @@ void loop()
         if (rawY > maxY) maxY = rawY;
         if (rawZ > maxZ) maxZ = rawZ;
 
-        if (millis() - calibStartTime > 20000)
-        {
+        if (millis() - calibStartTime > 20000){
             offX = (maxX + minX) / 2.0;
             offY = (maxY + minY) / 2.0;
             offZ = (maxZ + minZ) / 2.0;
@@ -466,15 +442,23 @@ void loop()
     heading += headingOffset;
 
     // Normalize magnetic heading
-    if (heading >= 360) heading -= 360;
-    if (heading < 0) heading += 360;
+    if (heading >= 360){
+        heading -= 360;
+    }
+    if (heading < 0){
+        heading += 360;
+    }
 
     // Apply declination
     float trueHeading = heading + magneticDeclination;
 
     // Normalize true heading
-    if (trueHeading >= 360) trueHeading -= 360;
-    if (trueHeading < 0) trueHeading += 360;
+    if (trueHeading >= 360){
+        trueHeading -= 360;
+    }
+    if (trueHeading < 0){
+        trueHeading += 360;
+    }
 
     Serial.print("\nMag Heading: ");
     Serial.println(heading, 1);

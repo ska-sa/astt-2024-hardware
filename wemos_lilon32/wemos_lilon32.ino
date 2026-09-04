@@ -12,10 +12,10 @@
 // ---------- wifi and api ----------
 const char* ssid = "SARAO_Guest";
 const char* password = "ska.2009";
-const char* commandsUrl = "http://172.22.9.145:8000/api/v1/commands/1/latest";
-const char* readingsUrl = "http://172.22.9.145:8000/api/v1/readings";
+const char* commandsUrl = "http://172.22.9.54:8000/api/v1/commands/7/latest";
+const char* readingsUrl = "http://172.22.9.54:8000/api/v1/readings";
 const char* ntpServer = "pool.ntp.org";
-int telescopeId = 1;
+int telescopeId = 7;
 
 
 
@@ -25,8 +25,8 @@ const int IN1 = 25;
 const int IN2 = 26;
 const int ENA = 27;
 const int potPin = 34;  // adc1, input only, safe with wifi
-const int encPin = 21;
-const int estopPin = 19;
+const int encPin = 19;
+const int estopPin = 23;
 
 
 // ---------- azimuth range ----------
@@ -99,16 +99,17 @@ Adafruit_GPS GPS(&Wire);
 SFE_MMC5983MA myMag;
 bool magOk = false;
 
-
 float magneticDeclination = -25.6;
 float headingOffset = 90.0;
+float DEFAULT_HEADING = 0.0;   // used when magnetometer is absent or not yet calibrated
+float trueHeading = DEFAULT_HEADING;
+
 bool calibrated = false;
 unsigned long calibStartTime = 0;
 uint32_t minX = 4294967295, minY = 4294967295, minZ = 4294967295;
 uint32_t maxX = 0, maxY = 0, maxZ = 0;
 float offX = 0, offY = 0, offZ = 0;
 float scaleX = 1, scaleY = 1, scaleZ = 1;
-
 
 
 
@@ -220,6 +221,44 @@ float readEncoderAngle() {
 }
 
 
+// ================= magnetometer =================
+
+// returns the current true heading in degrees.
+// if the sensor is missing or still calibrating, returns the default
+// instead of stalling the rest of the system.
+float computeTrueHeading() {
+  if (!magOk) return DEFAULT_HEADING;
+
+  uint32_t rawX, rawY, rawZ;
+  myMag.getMeasurementXYZ(&rawX, &rawY, &rawZ);
+
+  if (!calibrated) {
+    if (rawX < minX) minX = rawX;
+    if (rawY < minY) minY = rawY;
+    if (rawZ < minZ) minZ = rawZ;
+    if (rawX > maxX) maxX = rawX;
+    if (rawY > maxY) maxY = rawY;
+    if (rawZ > maxZ) maxZ = rawZ;
+
+    if (millis() - calibStartTime > 20000) {
+      offX = (maxX + minX) / 2.0;
+      offY = (maxY + minY) / 2.0;
+      offZ = (maxZ + minZ) / 2.0;
+      scaleX = (maxX - minX) / 2.0;
+      scaleY = (maxY - minY) / 2.0;
+      scaleZ = (maxZ - minZ) / 2.0;
+      calibrated = true;
+      Serial.println("mag calibrated");
+    }
+    return DEFAULT_HEADING;  // still calibrating, no reading yet
+  }
+
+
+  float cx = ((float)rawX - offX) / scaleX;
+  float cy = ((float)rawY - offY) / scaleY;
+  float heading = norm360(atan2(cx, -cy) * 180.0 / PI + 180 + headingOffset);
+  return norm360(heading + magneticDeclination);
+}
 
 
 // ================= potentiometer =================
@@ -303,7 +342,7 @@ float computeAzFromSource() {
 
   // day of year, with a fraction for the time of day
   float dayOfYear = utc.tm_yday + 1
-                  + (utc.tm_hour * 3600.0 + utc.tm_min * 60.0 + utc.tm_sec) / 86400.0;
+                    + (utc.tm_hour * 3600.0 + utc.tm_min * 60.0 + utc.tm_sec) / 86400.0;
 
 
   // ra is piecewise linear in hours, one slope per half of the year
@@ -413,7 +452,7 @@ void postReadings() {
   doc["acceleration_x"] = 0;
   doc["acceleration_y"] = 0;
   doc["acceleration_z"] = 0;
-  doc["magnetic_field_x"] = 0;
+  doc["magnetic_field_x"] = trueHeading;   // reusing this field until a dedicated heading field exists
   doc["magnetic_field_y"] = 0;
   doc["magnetic_field_z"] = 0;
   doc["health_status"] = healthStatus;
@@ -499,9 +538,9 @@ void setup() {
   Wire.begin();
 
 
-//   GPS.begin(0x10);
-//   GPS.sendCommand(PMTK_SET_NMEA_OUTPUT_RMCGGA);
-//   GPS.sendCommand(PMTK_SET_NMEA_UPDATE_1HZ);
+  GPS.begin(0x10);
+  GPS.sendCommand(PMTK_SET_NMEA_OUTPUT_RMCGGA);
+  GPS.sendCommand(PMTK_SET_NMEA_UPDATE_1HZ);
 
 
   magOk = myMag.begin();
@@ -534,7 +573,7 @@ void loop() {
   unsigned long now = millis();
 
 
-  //readGPS();
+  readGPS();
 
 
   // estop
@@ -560,6 +599,9 @@ void loop() {
   // where we are
   float current = readEncoderAngle();
   azimuthAngle = current;
+
+  // magnetometer heading, used as a cross check reference only
+  trueHeading = computeTrueHeading();
 
 
   // did the user turn the knob
@@ -601,37 +643,36 @@ void loop() {
     source = "pot";
   }
   target = norm360(target);
-    /*
-  // never aim into the blocked zone
-  if (inBlockedZone(target)) {
+  /*
+    // never aim into the blocked zone
+    if (inBlockedZone(target)) {
     stopMotor();
     movementStatus = "BLOCKED";
     Serial.printf("az %.1f tgt %.1f blocked\n", current, target);
-  } else {*/
-    float error = fabs(cwDistance(current, target));
-    if (error > 180.0) error = 360.0 - error;
+    } else {*/
+  float error = fabs(cwDistance(current, target));
+  if (error > 180.0) error = 360.0 - error;
 
 
-    int pwm = computePwm(error);
-    int dir = chooseDirection(current, target);
+  int pwm = computePwm(error);
+  int dir = chooseDirection(current, target);
 
 
-    if (pwm == 0) {
-      stopMotor();
-      movementStatus = "IDLE";
-    } else if (dir == 0) {
-      stopMotor();
-      movementStatus = "NO PATH";
-    } else {
-      driveMotor(pwm, dir);
-      movementStatus = isTracking ? "TRACKING" : "MOVING";
-    }
-
-
-    Serial.printf("az %.1f tgt %.1f el %.1f err %.1f pwm %d %s %s\n", current, target, trackEl, error, pwm, source, movementStatus.c_str());
-  /*
+  if (pwm == 0) {
+    stopMotor();
+    movementStatus = "IDLE";
+  } else if (dir == 0) {
+    stopMotor();
+    movementStatus = "NO PATH";
+  } else {
+    driveMotor(pwm, dir);
+    movementStatus = isTracking ? "TRACKING" : "MOVING";
   }
-  */
+
+
+  Serial.printf("az %.1f tgt %.1f mag %.1f el %.1f err %.1f pwm %d %s %s\n", current, target, trueHeading, trackEl, error, pwm, source, movementStatus.c_str());  /*
+  }
+*/
 
 
   // network
@@ -645,37 +686,5 @@ void loop() {
   }
 
 
-  // magnetometer heading
-  if (magOk) {
-    uint32_t rawX, rawY, rawZ;
-    myMag.getMeasurementXYZ(&rawX, &rawY, &rawZ);
 
-
-    if (!calibrated) {
-      if (rawX < minX) minX = rawX;
-      if (rawY < minY) minY = rawY;
-      if (rawZ < minZ) minZ = rawZ;
-      if (rawX > maxX) maxX = rawX;
-      if (rawY > maxY) maxY = rawY;
-      if (rawZ > maxZ) maxZ = rawZ;
-
-
-      if (millis() - calibStartTime > 20000) {
-        offX = (maxX + minX) / 2.0;
-        offY = (maxY + minY) / 2.0;
-        offZ = (maxZ + minZ) / 2.0;
-        scaleX = (maxX - minX) / 2.0;
-        scaleY = (maxY - minY) / 2.0;
-        scaleZ = (maxZ - minZ) / 2.0;
-        calibrated = true;
-        Serial.println("mag calibrated");
-      }
-    } else {
-      float cx = ((float)rawX - offX) / scaleX;
-      float cy = ((float)rawY - offY) / scaleY;
-      float heading = norm360(atan2(cx, -cy) * 180.0 / PI + 180 + headingOffset);
-      float trueHeading = norm360(heading + magneticDeclination);
-      Serial.printf("heading %.1f\n", trueHeading);
-    }
-  }
 }

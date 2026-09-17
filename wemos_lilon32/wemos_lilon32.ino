@@ -94,10 +94,25 @@ String healthStatus = "OK";
 String movementStatus = "IDLE";
 
 
-// ---------- sensors ----------
+// ---------- level antenna sensors ----------
+// The MPU6050 shares the SDA/SCL I2C bus with the GPS and magnetometer.
+const int I2C_SDA = 21;
+const int I2C_SCL = 22;
 Adafruit_GPS GPS(&Wire);
 SFE_MMC5983MA myMag;
 bool magOk = false;
+
+const uint8_t MPU_ADDR = 0x68;
+bool mpuOk = false;
+float mpuAccelX = 0.0;
+float mpuAccelY = 0.0;
+float mpuAccelZ = 0.0;
+float mpuGyroX = 0.0;
+float mpuGyroY = 0.0;
+float mpuGyroZ = 0.0;
+float magneticFieldX = 0.0;
+float magneticFieldY = 0.0;
+float magneticFieldZ = 0.0;
 
 float magneticDeclination = -25.6;
 float headingOffset = 90.0;
@@ -110,6 +125,41 @@ uint32_t minX = 4294967295, minY = 4294967295, minZ = 4294967295;
 uint32_t maxX = 0, maxY = 0, maxZ = 0;
 float offX = 0, offY = 0, offZ = 0;
 float scaleX = 1, scaleY = 1, scaleZ = 1;
+
+bool readMpu() {
+  Wire.beginTransmission(MPU_ADDR);
+  Wire.write(0x3B);
+  if (Wire.endTransmission(false) != 0 || Wire.requestFrom(MPU_ADDR, (uint8_t)14, (uint8_t)true) != 14) {
+    return false;
+  }
+
+  uint8_t raw[14];
+  for (uint8_t i = 0; i < 14; i++) raw[i] = Wire.read();
+
+  int16_t ax = (int16_t)((raw[0] << 8) | raw[1]);
+  int16_t ay = (int16_t)((raw[2] << 8) | raw[3]);
+  int16_t az = (int16_t)((raw[4] << 8) | raw[5]);
+  int16_t gx = (int16_t)((raw[8] << 8) | raw[9]);
+  int16_t gy = (int16_t)((raw[10] << 8) | raw[11]);
+  int16_t gz = (int16_t)((raw[12] << 8) | raw[13]);
+
+  mpuAccelX = ax / 16384.0f;
+  mpuAccelY = ay / 16384.0f;
+  mpuAccelZ = az / 16384.0f;
+  mpuGyroX = gx / 131.0f;
+  mpuGyroY = gy / 131.0f;
+  mpuGyroZ = gz / 131.0f;
+  return true;
+}
+
+bool initMpu() {
+  Wire.beginTransmission(MPU_ADDR);
+  Wire.write(0x6B);
+  Wire.write(0x00);
+  if (Wire.endTransmission() != 0) return false;
+  delay(100);
+  return readMpu();
+}
 
 
 
@@ -227,10 +277,19 @@ float readEncoderAngle() {
 // if the sensor is missing or still calibrating, returns the default
 // instead of stalling the rest of the system.
 float computeTrueHeading() {
-  if (!magOk) return DEFAULT_HEADING;
+  if (!magOk) {
+    magOk = myMag.begin();
+    if (magOk) myMag.softReset();
+    else return DEFAULT_HEADING;
+  }
 
   uint32_t rawX, rawY, rawZ;
   myMag.getMeasurementXYZ(&rawX, &rawY, &rawZ);
+  // MMC5983 output is unsigned 18-bit counts centered at 131072.
+  // 0.00625 mG/LSB = 6.25e-10 T/LSB.
+  magneticFieldX = ((float)rawX - 131072.0f) * 6.25e-10f;
+  magneticFieldY = ((float)rawY - 131072.0f) * 6.25e-10f;
+  magneticFieldZ = ((float)rawZ - 131072.0f) * 6.25e-10f;
 
   if (!calibrated) {
     if (rawX < minX) minX = rawX;
@@ -286,7 +345,7 @@ void stopMotor() {
 
 
 void driveMotor(int pwm, int direction) {
-  if (direction < 0) {
+  if (direction > 0) {
     digitalWrite(IN1, HIGH);
     digitalWrite(IN2, LOW);
   } else {
@@ -446,22 +505,30 @@ void postReadings() {
   doc["latitude"] = latitude;
   doc["longitude"] = longitude;
   doc["altitude"] = altitude;
-  doc["gyroscope_x"] = 0;
-  doc["gyroscope_y"] = 0;
-  doc["gyroscope_z"] = 0;
-  doc["acceleration_x"] = 0;
-  doc["acceleration_y"] = 0;
-  doc["acceleration_z"] = 0;
-  doc["magnetic_field_x"] = trueHeading;   // reusing this field until a dedicated heading field exists
-  doc["magnetic_field_y"] = 0;
-  doc["magnetic_field_z"] = 0;
+  doc["gyroscope_x"] = mpuGyroX;
+  doc["gyroscope_y"] = mpuGyroY;
+  doc["gyroscope_z"] = mpuGyroZ;
+  doc["acceleration_x"] = mpuAccelX * 9.80665f;
+  doc["acceleration_y"] = mpuAccelY * 9.80665f;
+  doc["acceleration_z"] = mpuAccelZ * 9.80665f;
+  doc["magnetic_field_x"] = magneticFieldX;
+  doc["magnetic_field_y"] = magneticFieldY;
+  doc["magnetic_field_z"] = magneticFieldZ;
   doc["health_status"] = healthStatus;
   doc["movement_status"] = movementStatus;
 
 
   String payload;
   serializeJson(doc, payload);
-  http.POST(payload);
+  Serial.printf("GPS lat %.5f lon %.5f alt %.1f m fix %d\n", latitude, longitude, altitude, GPS.fix);
+  Serial.printf("MPU accel %.4f %.4f %.4f m/s2, gyro %.2f %.2f %.2f deg/s (%s)\n",
+                mpuAccelX * 9.80665f, mpuAccelY * 9.80665f, mpuAccelZ * 9.80665f,
+                mpuGyroX, mpuGyroY, mpuGyroZ,
+                mpuOk ? "OK" : "NOT FOUND");
+  Serial.printf("MAG %.8f %.8f %.8f T (%s)\n",
+                magneticFieldX, magneticFieldY, magneticFieldZ, magOk ? "OK" : "NOT FOUND");
+  int responseCode = http.POST(payload);
+  Serial.printf("readings POST %d: %s\n", responseCode, payload.c_str());
   http.end();
 }
 
@@ -535,7 +602,9 @@ void setup() {
   stopMotor();
 
 
-  Wire.begin();
+  pinMode(I2C_SDA, INPUT_PULLUP);
+  pinMode(I2C_SCL, INPUT_PULLUP);
+  Wire.begin(I2C_SDA, I2C_SCL);
 
 
   GPS.begin(0x10);
@@ -546,6 +615,10 @@ void setup() {
   magOk = myMag.begin();
   if (magOk) myMag.softReset();
   else Serial.println("no magnetometer");
+
+  mpuOk = initMpu();
+  if (mpuOk) Serial.println("mpu6050 ready");
+  else Serial.println("no mpu6050");
 
 
   connectWifi();
@@ -602,6 +675,14 @@ void loop() {
 
   // magnetometer heading, used as a cross check reference only
   trueHeading = computeTrueHeading();
+
+  if (!readMpu()) {
+    if (mpuOk) Serial.println("mpu6050 read failed");
+    mpuOk = false;
+  } else {
+    if (!mpuOk) Serial.println("mpu6050 detected");
+    mpuOk = true;
+  }
 
 
   // did the user turn the knob
